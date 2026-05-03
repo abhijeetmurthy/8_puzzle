@@ -1,268 +1,225 @@
-from sys import maxsize
+import heapq
 import time
+from itertools import count
 
-# https://docs.python.org/3/library/copy.html#copy.deepcopy
-# Used to perform copy while expanding children.
-from copy import deepcopy
-from tracemalloc import start 
-#Performing deepcopy as below.
-def deep_copy(state, children):
-    child = deepcopy(state) #creates a child based on the last move
-    child._depth += 1  #increment _depth cost by one for each move (here each edge just costs 1)
-    children.append(child)
+GOAL_STATE = (1, 2, 3, 4, 5, 6, 7, 8, 0)
+GOAL_POSITIONS = {tile: divmod(index, 3) for index, tile in enumerate(GOAL_STATE)}
 
 
-#def Global Variables
-_queue = []
-_expanded = 0  #pretty much a static
-_goal_state = [[1, 2, 3], [4, 5, 6], [7, 8, 0]] #hold the goal/end state internally in the puzzle class
+def format_state(state):
+    """Return a readable 3x3 grid string for a flattened puzzle state."""
+    rows = [state[i : i + 3] for i in range(0, 9, 3)]
+    return "\n".join(str(list(row)) for row in rows)
 
 
+def parse_puzzle_input():
+    """Read and validate a 3x3 puzzle from interactive user input."""
+    print("Use 0 for the blank tile and commas between values (example: 1,2,3).")
+    values = []
 
-#def Class State: It is the state of the given state. It is represented by the 3x3 puzzle, G(n) of the solution and H(n) of the solution.
-class State:
-    def __init__(self, puzzle, depth, heuristic): 
-        self.puzzle = puzzle
-        self._depth = depth
-        self._heuristic = heuristic
+    for row_index in range(3):
+        row = input(f"Numbers in row {row_index}: ").strip().split(",")
+        if len(row) != 3:
+            raise ValueError("Each row must contain exactly 3 comma-separated values.")
 
-#def Class Puzzle: Defines the puzzle, the operators what can be performed and helper function to print the 3x3 puzzles.
-class Puzzle:
-    def __init__(self, game): 
-        self.game = game
-        self._y, self._x = self.find_0() #order here is y->x, or row->col
+        try:
+            row_values = [int(value.strip()) for value in row]
+        except ValueError as exc:
+            raise ValueError("All entries must be integers.") from exc
 
-    # def left:move 0 left if possible and report false otherwise
-    def left(self): 
-        in_left_col = False 
-        for x in range(3):
-            if self.game[x][0] == 0: 
-                in_left_col = True
-                break
+        values.extend(row_values)
 
-        if in_left_col == False:
-            self.swap(self._y, self._x - 1)
-            self._x = self._x - 1 
-            return True
+    if set(values) != set(range(9)):
+        raise ValueError("Puzzle must contain each number from 0 to 8 exactly once.")
 
-        else: 
-            return False
-    # def right:move 0 right if possible and report false otherwise
-    def right(self): 
-        in_right_col = False 
-        for x in range(3):
-            if self.game[x][2] == 0:
-                in_right_col = True
-                break
+    return tuple(values)
 
-        if in_right_col == False:
-            self.swap(self._y, self._x + 1)
-            self._x = self._x + 1
-            return True
 
-        else: 
-            return False
+def is_solvable(state):
+    """For a 3x3 puzzle, a state is solvable when inversion count is even."""
+    numbers = [value for value in state if value != 0]
+    inversions = 0
 
-    # def up:move 0 up if possible and report false otherwise
-    def up(self): 
-        if 0 not in self.game[0]: 
-            self.swap(self._y - 1, self._x)
-            self._y = self._y - 1 
-            return True
+    for i in range(len(numbers)):
+        for j in range(i + 1, len(numbers)):
+            if numbers[i] > numbers[j]:
+                inversions += 1
 
-        else: 
-            return False
-    # def down:move 0 down if possible and report false otherwise
-    def down(self):
-        if 0 not in self.game[2]:
-            self.swap(self._y + 1, self._x) 
-            self._y = self._y + 1
-            return True
+    return inversions % 2 == 0
 
-        else: 
-            return False
 
-    # def helper: function to locate 0 in the puzzle.
-    def find_0(self):
-        for x in range(len(self.game)): 
-            for y in range(len(self.game)):
-                if self.game[x][y] == 0: 
-                    return x, y 
-
-    # def swap: simple swap function to replace any tile with the blank.
-    def swap(self, y, x):
-        temp_0 = self.game[self._y][self._x] 
-        self.game[self._y][self._x] = self.game[y][x] 
-        self.game[y][x] = temp_0
-    
-    # def _print: Print the state.
-    def _print(self):
-        strstr = []
-        for x in range(len(self.game)):
-            for y in range(len(self.game)): 
-                strstr.append(self.game[x][y]) 
-            print(strstr) 
-            strstr = [] 
-
-# def operate: Returns all possible children of the given puzzle.    
-def operate(state):
-    global _expanded 
-    children = []
-    # We use the operators defined above to create child states, which are added to the queue.
-    if state.puzzle.right(): 
-        _queue.append(state.puzzle.game) 
-        deep_copy(state, children)
-        state.puzzle.left()
-
-    if state.puzzle.left():
-        _queue.append(state.puzzle.game) 
-        deep_copy(state, children)
-        state.puzzle.right() 
-
-    if state.puzzle.up(): 
-        _queue.append(state.puzzle.game) 
-        deep_copy(state, children) 
-        state.puzzle.down() 
-
-    if state.puzzle.down(): 
-        _queue.append(state.puzzle.game) 
-        deep_copy(state, children) 
-        state.puzzle.up() 
-        
-    _expanded += len(children)
-    return children
-
-# def pop: works by returning the child with minimum cost given an list of nodes. Alternatively can use priority queue(heapq) in python.
-def pop(queue):
-    min_total_cost = maxsize
-    positition = maxsize 
-    
-    for n in range(len(queue)):
-        if queue[n]._depth + queue[n]._heuristic < min_total_cost:
-            min_total_cost = queue[n]._depth + queue[n]._heuristic
-            positition = n
-    state = queue.pop(positition)
-    return state
-    
-# def misplaced_tiles: measures the number of tiles out of position.
 def misplaced_tiles(state):
-    h = 0 
-    for i in range(len(state.puzzle.game)):
-        for j in range(len(state.puzzle.game)):
-            if state.puzzle.game[i][j] != _goal_state[i][j]: 
-                if state.puzzle.game[i][j] != 0: 
-                    h += 1
-    print("printing h:")
-    return h
+    """Heuristic: count tiles that are not in the goal position (excluding blank)."""
+    return sum(1 for index, value in enumerate(state) if value and value != GOAL_STATE[index])
 
-# def manhattan_distance: measures the number of tiles out of position.
+
 def manhattan_distance(state):
-    h = 0 
-    def map(state, i, j):
-        tile = state.puzzle.game[i][j] 
-        find_tile={1:[0,0],2:[0,1],3:[0,2],4:[1,0],5:[1,1],6:[1,2],7:[2,0],8:[2,1]}
-        return find_tile[tile][0],find_tile[tile][1]
+    """Heuristic: sum of Manhattan distances from each tile to its goal position."""
+    distance = 0
 
-    for i in range(len(state.puzzle.game)):
-        for j in range(len(state.puzzle.game)):
-            if state.puzzle.game[i][j] != _goal_state[i][j]: 
-                if state.puzzle.game[i][j] != 0: 
-                    row_diff, col_diff = map(state, i, j) 
-                    temp_h = pow(pow((i - row_diff), 2) + pow(j - col_diff, 2), 0.5) #h formula
-                    h += temp_h
-    return h
+    for index, value in enumerate(state):
+        if value == 0:
+            continue
 
-def expand_blind(queue, state, children):     
-    for child in children: 
-        if child.puzzle.game not in _queue: 
-            queue.append(child)
-            _queue.append(child.puzzle.game)
+        row, col = divmod(index, 3)
+        goal_row, goal_col = GOAL_POSITIONS[value]
+        distance += abs(row - goal_row) + abs(col - goal_col)
 
-def expand_misplaced(queue, state, children):
-    for child in children: 
-        child._heuristic = misplaced_tiles(child)
-        if child.puzzle.game not in _queue: 
-            queue.append(child)
-            _queue.append(child.puzzle.game)
-            
-def expand_manhattan(queue, state, children):
-    for child in children: 
-        child._heuristic = manhattan_distance(child)
-        if child.puzzle.game not in _queue: 
-            queue.append(child)
-            _queue.append(child.puzzle.game)
-
-# def expand: calculate the h(n) value. 
-def expand(queue, state, _algo):
-    print("Expanding State [G(n) = " + str(state._depth) + " and H(n) = " + str(state._heuristic)+"]")
-    state.puzzle._print()
-
-    children = operate(state) 
-    if _algo==1:
-        expand_blind(queue, state, children)
-            
-    elif _algo==2:
-        expand_misplaced(queue, state, children)
-
-    elif _algo==3:
-        expand_manhattan(queue, state, children)
-    return queue
+    return distance
 
 
+def neighbors(state):
+    """Generate neighbor states reachable by moving the blank one step."""
+    zero_index = state.index(0)
+    row, col = divmod(zero_index, 3)
+    moves = []
 
-# def General_search: Puesdo code as per slides of Dr.Eamonn.
-def General_search(puzzle, _algo):
-    # if _algo==1:
-    _depth = 0
-    heuristic = 0
-    #initialisation with 
-    state = State(puzzle, _depth, heuristic)  
-    #update heuristic for misplaced tiles h(n)
-    if _algo == 2: 
-        state._heuristic = misplaced_tiles(state)
+    if row > 0:
+        moves.append((-3, "up"))
+    if row < 2:
+        moves.append((3, "down"))
+    if col > 0:
+        moves.append((-1, "left"))
+    if col < 2:
+        moves.append((1, "right"))
 
-    #update _heuristic for manhattan h(n)
-    elif _algo == 3: 
-        state._heuristic = manhattan_distance(state)
+    for offset, move in moves:
+        swap_index = zero_index + offset
+        new_state = list(state)
+        new_state[zero_index], new_state[swap_index] = new_state[swap_index], new_state[zero_index]
+        yield tuple(new_state), move
 
-    #initialize with first state
-    queue = [state] 
-    max_queue_size = 0
 
-    while True:
-        max_queue_size = max(len(queue), max_queue_size) #max size seen so far is the max queue size ever seen
+def reconstruct_moves(came_from, goal):
+    """Rebuild the solution path as a list of move names from start to goal."""
+    moves = []
+    current = goal
 
-        if not queue: 
-            print("Invalid Puzzle!")
-            return
+    while current in came_from:
+        previous, move = came_from[current]
+        moves.append(move)
+        current = previous
 
-        (state) = pop(queue)
+    moves.reverse()
+    return moves
 
-        if state.puzzle.game == _goal_state: 
-            print("Goal State!\n")
-            print("Number of nodes expanded: " + str(_expanded))
-            print("Max queue size: " + str(max_queue_size))
-            return
 
-        queue = expand(queue, state, _algo)
+def choose_heuristic(algo):
+    """Map CLI algorithm choice to the heuristic function used in search."""
+    if algo == 1:
+        return lambda _state: 0  # Uniform Cost Search
+    if algo == 2:
+        return misplaced_tiles
+    if algo == 3:
+        return manhattan_distance
 
-# def main: driver code to retreive user inputs of the puzzle and the algorithm to be used. 
+    raise ValueError("Invalid algorithm choice. Pick 1, 2, or 3.")
+
+
+def general_search(initial_state, algo, verbose=False):
+    """Run UCS/A* and return search metrics plus the move sequence if solved."""
+    heuristic = choose_heuristic(algo)
+    frontier = []
+    tie_breaker = count()
+
+    start_h = heuristic(initial_state)
+    heapq.heappush(frontier, (start_h, 0, next(tie_breaker), initial_state))
+
+    g_score = {initial_state: 0}
+    closed = set()
+    came_from = {}
+    max_queue_size = 1
+    expanded_nodes = 0
+
+    while frontier:
+        max_queue_size = max(max_queue_size, len(frontier))
+        f_score, depth, _, state = heapq.heappop(frontier)
+
+        if state in closed:
+            continue
+
+        if verbose:
+            print(f"Expanding state [g(n)={depth}, h(n)={f_score - depth}]")
+            print(format_state(state))
+            print()
+
+        if state == GOAL_STATE:
+            return {
+                "solved": True,
+                "moves": reconstruct_moves(came_from, state),
+                "depth": depth,
+                "expanded": expanded_nodes,
+                "max_queue": max_queue_size,
+            }
+
+        closed.add(state)
+        expanded_nodes += 1
+
+        for next_state, move in neighbors(state):
+            if next_state in closed:
+                continue
+
+            candidate_depth = depth + 1
+            if candidate_depth >= g_score.get(next_state, float("inf")):
+                continue
+
+            g_score[next_state] = candidate_depth
+            came_from[next_state] = (state, move)
+            next_f = candidate_depth + heuristic(next_state)
+            heapq.heappush(frontier, (next_f, candidate_depth, next(tie_breaker), next_state))
+
+    return {
+        "solved": False,
+        "moves": [],
+        "depth": -1,
+        "expanded": expanded_nodes,
+        "max_queue": max_queue_size,
+    }
+
+
 def main():
-    
-    _puzzle = []
-    print("Use 0 for the blank and , for space.")
-    for i in range(0,3):
-        row=(input("Numbers in "+str(i)+" row.")).split(",")
-        row=[int(_) for _ in row]
-        _puzzle.append(row)
+    try:
+        initial_state = parse_puzzle_input()
+    except ValueError as error:
+        print(f"Input error: {error}")
+        return
 
-    puzzle = Puzzle(_puzzle)
-    _algo = int(input("Choice of algorithms to use:\n"+ "1. Uniform Cost Search\n2. A* with Misplaced Tile Heuristic\n3: A* with manhattan  Distance Heuristic\n"))
+    if not is_solvable(initial_state):
+        print("This puzzle configuration is not solvable.")
+        return
+
+    print(
+        "Choice of algorithm:\n"
+        "1. Uniform Cost Search\n"
+        "2. A* with Misplaced Tile Heuristic\n"
+        "3. A* with Manhattan Distance Heuristic"
+    )
+
+    try:
+        algo = int(input("Enter 1, 2, or 3: ").strip())
+    except ValueError:
+        print("Algorithm choice must be an integer.")
+        return
+
     start = time.time()
-    puzzle._print()
-    General_search(puzzle,_algo)
-    # General_search(puzzle,1)
-    end = time.time()
-    print(end-start)
+    result = general_search(initial_state, algo)
+    duration = time.time() - start
 
-main()
+    print("Initial state:")
+    print(format_state(initial_state))
+    print()
+
+    if result["solved"]:
+        print("Goal state reached.")
+        print(f"Moves to solution: {len(result['moves'])}")
+        print(f"Move sequence: {' -> '.join(result['moves']) if result['moves'] else '(already solved)'}")
+    else:
+        print("No solution found.")
+
+    print(f"Nodes expanded: {result['expanded']}")
+    print(f"Max queue size: {result['max_queue']}")
+    print(f"Runtime (seconds): {duration:.6f}")
+
+
+if __name__ == "__main__":
+    main()
